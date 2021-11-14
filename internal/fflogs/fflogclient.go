@@ -176,8 +176,8 @@ func (c *ClientImplementation) GetEvents(ctx context.Context,
 	code string, fightID int, startTime, endTime float64, dataType EventDataType, hostilityType HostilityType) ([]*RawBuffEvent, error) {
 	t0 := time.Now()
 	defer func() {
-		log.Printf("GetEvents(%s,%s) took %.2fs\n", dataType, hostilityType,
-			time.Since(t0).Seconds())
+		log.Printf("GetEvents(%s,%d,%.0f,%.0f,%s,%s) took %.2fs\n",
+			code, fightID, startTime, endTime, dataType, hostilityType, time.Since(t0).Seconds())
 	}()
 	// {
 	// 	reportData {
