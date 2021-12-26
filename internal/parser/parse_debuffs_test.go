@@ -22,7 +22,8 @@ func TestParseMitigs(t *testing.T) {
 	err = json.Unmarshal(b, &teamBuffs)
 	st := 26641244
 	assert.NilError(t, err)
-	ds := xivdata.NewDataSource()
+	ds, err := xivdata.NewDataSource()
+	assert.NilError(t, err)
 	p := New(ds)
 	evts := p.ParseMitigBuff(teamBuffs, int64(st))
 	println(strings.Join(stringifyMitigs(evts, ds), "\n"))
@@ -54,7 +55,8 @@ func TestParseDebuffs(t *testing.T) {
 	err = json.Unmarshal(b, &enemyDebuffs)
 	st := 26641244
 	assert.NilError(t, err)
-	ds := xivdata.NewDataSource()
+	ds, err := xivdata.NewDataSource()
+	assert.NilError(t, err)
 	p := New(ds)
 	evts := p.ParseDebuffs(enemyDebuffs, int64(st))
 	sl := stringifyDebuffs(evts, ds)

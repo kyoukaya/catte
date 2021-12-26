@@ -42,7 +42,8 @@ func main() {
 	log.SetOutput(f)
 	fflogsClient, err := fflogs.NewClient(fflogsClientID, fflogsToken)
 	check(err)
-	ds := xivdata.NewDataSource()
+	ds, err := xivdata.NewDataSource()
+	check(err)
 	app := &App{
 		xivds:  ds,
 		fflogs: fflogsClient,

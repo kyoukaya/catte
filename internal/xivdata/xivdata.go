@@ -2,12 +2,10 @@ package xivdata
 
 import (
 	_ "embed"
-
-	json "github.com/json-iterator/go"
+	"encoding/csv"
+	"net/http"
+	"strconv"
 )
-
-//go:embed ability_cache.json
-var abilitiesBytes []byte
 
 type DataSource struct {
 	Abilities map[int]*Ability
@@ -15,16 +13,27 @@ type DataSource struct {
 
 type Ability struct {
 	Name string
-	Icon string
 }
 
-func NewDataSource() *DataSource {
+func NewDataSource() (*DataSource, error) {
 	abilities := map[int]*Ability{}
-	err := json.Unmarshal(abilitiesBytes, &abilities)
+	resp, err := http.Get("https://raw.githubusercontent.com/xivapi/ffxiv-datamining/master/csv/Action.csv")
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	r := csv.NewReader(resp.Body)
+	for i := 0; i < 3; i++ {
+		r.Read()
+	}
+	for l, err := r.Read(); err == nil; l, err = r.Read() {
+		i, err := strconv.Atoi(l[0])
+		if err != nil {
+			return nil, err
+		}
+		abilities[i] = &Ability{Name: l[1]}
 	}
 	return &DataSource{
 		Abilities: abilities,
-	}
+	}, nil
 }
