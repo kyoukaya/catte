@@ -9,6 +9,7 @@ import (
 	"github.com/kyoukaya/catte/internal/xivdata"
 )
 
+// The buffs/debuffs can be found in the status exd from datamined sheets. Just add 1e6 to the ID.
 var mitigDebuffs = map[int64]bool{
 	1001193: true, // Reprisal
 	1001195: true, // Feint
@@ -17,18 +18,22 @@ var mitigDebuffs = map[int64]bool{
 
 var mitigBuffs = map[int64]bool{
 	// Tanks
-	1001176: true, // Passage of Arms
+	1001176: true, // Passage of Arms (Arms up)
 	1001894: true, // Dark Missionary
 	1001839: true, // Heart of Light
 	// Healers
-	1001873: true, // Temperance
-	1000299: true, // Sacred Soil
-	1000317: true, // Fey Illumination
-	1000849: true, // Collective Unconscious
+	1001873: true, // WHM: Temperance
+	1000849: true, // AST: Collective Unconscious
+	1000299: true, // SCH: Sacred Soil
+	1000317: true, // SCH: Fey Illumination
+	1002711: true, // SCH: Expedient (Desperate Measures)
+	1002618: true, // SGE: Kerachole
+	1003003: true, // SGE: Holos
 	// Ranged
 	1001934: true, // Troubadour
 	1001951: true, // Tactician
 	1001826: true, // Shield Samba
+	1002707: true, // Magick Barrier
 }
 
 type DebuffEvent struct {
