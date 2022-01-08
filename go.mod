@@ -3,8 +3,9 @@ module github.com/kyoukaya/catte
 go 1.16
 
 require (
-	github.com/bwmarrin/discordgo v0.23.2
+	github.com/bwmarrin/discordgo v0.23.3-0.20211228023845-29269347e820
 	github.com/go-resty/resty/v2 v2.7.0
+	github.com/golang/mock v1.4.4
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/hasura/go-graphql-client v0.4.0

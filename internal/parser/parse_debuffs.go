@@ -51,7 +51,13 @@ type BuffEvent struct {
 }
 
 func (evt *DebuffEvent) String(ds *xivdata.DataSource) string {
-	name := ds.Abilities[int(evt.ID)].Name
+	evtinfo, ok := ds.Statuses[int(evt.ID)-1e6]
+	var name string
+	if !ok {
+		name = fmt.Sprintf("UNKNOWN %d", evt.ID)
+	} else {
+		name = evtinfo.Name
+	}
 	d := time.Duration(evt.Start) * time.Millisecond
 	d2 := time.Duration(evt.End) * time.Millisecond
 	s := fmt.Sprintf("%02d:%02d-%02d:%02d %s",
@@ -80,7 +86,13 @@ func (evt *BuffEvent) GetID() int64 {
 }
 
 func (evt *BuffEvent) String(ds *xivdata.DataSource) string {
-	name := ds.Abilities[int(evt.ID)].Name
+	evtinfo, ok := ds.Statuses[int(evt.ID)-1e6]
+	var name string
+	if !ok {
+		name = fmt.Sprintf("UNKNOWN %d", evt.ID)
+	} else {
+		name = evtinfo.Name
+	}
 	d := time.Duration(evt.Start) * time.Millisecond
 	d2 := time.Duration(evt.End) * time.Millisecond
 	return fmt.Sprintf("%02d:%02d-%02d:%02d %s (%d)",

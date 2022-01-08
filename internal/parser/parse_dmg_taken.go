@@ -20,7 +20,7 @@ type Parser struct {
 
 func New(ds *xivdata.DataSource) *Parser {
 	m := map[int64]struct{}{}
-	for id, a := range ds.Abilities {
+	for id, a := range ds.Actions {
 		if a.Name != "attack" {
 			continue
 		}

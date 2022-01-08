@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,16 +22,29 @@ import (
 	"github.com/kyoukaya/catte/internal/xivdata"
 )
 
-const prefix = ","
-
-type App struct {
-	xivds  *xivdata.DataSource
-	fflogs fflogs.Client
-	parser *parser.Parser
+type DiscordSession interface {
+	AddHandler(handler interface{}) func()
+	ApplicationCommandCreate(appID string, guildID string, cmd *discordgo.ApplicationCommand) (ccmd *discordgo.ApplicationCommand, err error)
+	InteractionRespond(interaction *discordgo.Interaction, resp *discordgo.InteractionResponse) (err error)
+	FollowupMessageCreate(appID string, interaction *discordgo.Interaction, wait bool, data *discordgo.WebhookParams) (*discordgo.Message, error)
 }
 
+type App struct {
+	userID          string
+	xivds           *xivdata.DataSource
+	fflogs          fflogs.Client
+	parser          *parser.Parser
+	commandHandlers map[string]Handler
+}
+type Handler func(ctx context.Context, s DiscordSession, i *discordgo.InteractionCreate) error
+type Command struct {
+	*discordgo.ApplicationCommand
+	f Handler
+}
+
+const envPrefix = "CATTE_"
+
 func main() {
-	const envPrefix = "CATTE_"
 	var (
 		token          = os.Getenv(envPrefix + "DISCORDTOKEN")
 		fflogsClientID = os.Getenv(envPrefix + "FFLOGSID")
@@ -52,23 +66,66 @@ func main() {
 
 	dg, err := discordgo.New("Bot " + token)
 	check(err)
-	dg.AddHandler(app.MessageHandler)
-	// In this example, we only care about receiving message events.
-	dg.Identify.Intents = discordgo.IntentsGuildMessages
-	// Open a websocket connection to Discord and begin listening.
 	err = dg.Open()
 	if err != nil {
 		panic(err)
 	}
+	app.RegisterSlashCommands(dg.State.User.ID, dg)
+	defer dg.Close()
 
 	// Wait here until CTRL-C or other term signal is received.
 	log.Printf("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
+}
 
-	// Cleanly close down the Discord session.
-	dg.Close()
+func (a *App) RegisterSlashCommands(userID string, dg DiscordSession) {
+	a.userID = userID
+	dg.AddHandler(a.slashWrap)
+	commands := []*Command{
+		{
+			ApplicationCommand: &discordgo.ApplicationCommand{
+				Name:        "mitig",
+				Description: "Get mitigation information from an FFLogs fight",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "fflogs-url",
+						Description: "FFLogs URL",
+						Required:    true,
+					},
+				},
+			},
+			f: a.MitigHandler,
+		},
+		{
+			ApplicationCommand: &discordgo.ApplicationCommand{
+				Name:        "dmgin",
+				Description: "Get incoming damage information from an FFLogs fight",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "fflogs-url",
+						Description: "FFLogs URL",
+						Required:    true,
+					},
+				},
+			},
+			f: a.DamageInHandler,
+		},
+	}
+	for _, v := range commands {
+		_, err := dg.ApplicationCommandCreate(userID, "", v.ApplicationCommand)
+		if err != nil {
+			log.Panicf("Cannot create '%v' command: %v", v.Name, err)
+		}
+	}
+	a.commandHandlers = map[string]Handler{}
+	for _, command := range commands {
+		log.Print("registered slash command handler ", command.Name)
+		a.commandHandlers[command.Name] = command.f
+	}
 }
 
 func check(err error) {
@@ -77,93 +134,70 @@ func check(err error) {
 	}
 }
 
-// This function will be called (due to AddHandler above) every time a new
-// message is created on any channel that the authenticated bot has access to.
-func (a *App) MessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Ignore all messages created by the bot itself
-	if m.Author.ID == s.State.User.ID {
+func (a *App) slashWrap(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	cmd := i.ApplicationCommandData().Name
+	f := a.commandHandlers[cmd]
+	if f == nil {
 		return
 	}
-	if !strings.HasPrefix(m.Content, prefix) {
-		return
-	}
-	err := a.router(s, m)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[ERROR] panic:\n" + string(debug.Stack()))
+		}
+	}()
+	t0 := time.Now()
+	defer func() { log.Printf("command %q took %.2fs", cmd, time.Since(t0).Seconds()) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	err := f(ctx, s, i)
 	if err != nil {
-		log.Printf("command failed: %v", err)
-		_, _ = s.ChannelMessageSend(m.ChannelID, "command failed: "+err.Error())
+		msg := fmt.Sprintf("command %q failed: %v", cmd, err)
+		log.Printf("[ERROR] %v", msg)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: msg},
+		})
 	}
 }
 
-func (a *App) router(s *discordgo.Session, m *discordgo.MessageCreate) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("recovered from panic: %v", r)
-		}
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	sl := strings.SplitN(strings.TrimPrefix(m.Content, prefix), " ", 2)
-	cmd := string(sl[0])
+func (a *App) DamageInHandler(ctx context.Context, s DiscordSession, i *discordgo.InteractionCreate) error {
 	t0 := time.Now()
-	defer func() { log.Printf("command %q took %.2fs", cmd, time.Since(t0).Seconds()) }()
-	switch cmd {
-	case "dmgin":
-		if len(sl) > 1 {
-			t0 := time.Now()
-			events, err := a.GetDamageCommand(ctx, string(sl[1]))
-			if err != nil {
-				return err
-			}
-			msg := strings.Join(stringifyAttacks(a.xivds, events), "\n")
-			_, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-				Reference: &discordgo.MessageReference{
-					MessageID: m.ID,
-					ChannelID: m.ChannelID,
-					GuildID:   m.GuildID,
-				},
-				Content: fmt.Sprintf("/stretch'd for %.2fs", time.Since(t0).Seconds()),
-				Files: []*discordgo.File{{
-					Name:   "timeline.txt",
-					Reader: strings.NewReader(msg),
-				}},
-			})
-			if err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("usage %sdmgin {fflogs URL}", prefix)
-		}
-	case "mitig":
-		if len(sl) > 1 {
-			t0 := time.Now()
-			go func() { _ = s.ChannelTyping(m.ChannelID) }()
-			evts, err := a.GetMitigUsage(ctx, string(sl[1]))
-			if err != nil {
-				return err
-			}
-			msg := strings.Join(stringifyBuffsDebuffs(a.xivds, evts), "\n")
-			_, err = s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
-				Reference: &discordgo.MessageReference{
-					MessageID: m.ID,
-					ChannelID: m.ChannelID,
-					GuildID:   m.GuildID,
-				},
-				Content: fmt.Sprintf("/stretch'd for %.2fs", time.Since(t0).Seconds()),
-				Files: []*discordgo.File{{
-					Name:   "mitigs.txt",
-					Reader: strings.NewReader(msg),
-				}},
-			})
-			if err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("usage %smitig {fflogs URL}", prefix)
-		}
-	default:
-		return fmt.Errorf("not sure what you meant, try asking another c@")
+	input := i.ApplicationCommandData().Options[0].StringValue()
+	events, err := a.GetDamageCommand(ctx, input)
+	if err != nil {
+		return err
 	}
-	return nil
+	dmginOutput := strings.Join(stringifyAttacks(a.xivds, events), "\n")
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: fmt.Sprintf("/stretch'd for %.2fs", time.Since(t0).Seconds()),
+			Files:   []*discordgo.File{{ContentType: "text/plain", Name: "damagein.txt", Reader: strings.NewReader(dmginOutput)}},
+		},
+	})
+}
+
+func (a *App) MitigHandler(ctx context.Context, s DiscordSession, i *discordgo.InteractionCreate) error {
+	t0 := time.Now()
+	input := i.ApplicationCommandData().Options[0].StringValue()
+	// Should auto switch over to followup message ideally for all messages
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		return err
+	}
+	evts, err := a.GetMitigUsage(ctx, input)
+	if err != nil {
+		return err
+	}
+	mitigOutput := strings.Join(stringifyBuffsDebuffs(a.xivds, evts), "\n")
+	m, err := s.FollowupMessageCreate(a.userID, i.Interaction, true, &discordgo.WebhookParams{
+		Content: fmt.Sprintf("/stretch'd for %.2fs", time.Since(t0).Seconds()),
+		Files:   []*discordgo.File{{ContentType: "text/plain", Name: "damagein.txt", Reader: strings.NewReader(mitigOutput)}},
+	})
+	log.Print(m.Content)
+	return err
 }
 
 func (a *App) GetMitigUsage(ctx context.Context, cmd string) ([]buffdebuffInterface, error) {
@@ -257,7 +291,7 @@ func getFightFromURL(cmd string) (code string, fightID int, err error) {
 func stringifyAttacks(xivds *xivdata.DataSource, infoTL []*parser.EventInfo) []string {
 	res := []string{}
 	for _, v := range infoTL {
-		name := xivds.Abilities[int(v.ID)].Name
+		name := xivds.Actions[int(v.ID)].Name
 		if name == "attack" {
 			name = "AA"
 		}
@@ -305,6 +339,7 @@ type buffdebuffInterface interface {
 func stringifyBuffsDebuffs(ds *xivdata.DataSource, evts []buffdebuffInterface) []string {
 	ret := []string{}
 	sort.Sort(SortByDebuffStart(evts))
+	log.Printf("evts: %#v", evts)
 	for _, evt := range evts {
 		ret = append(ret, evt.String(ds))
 	}

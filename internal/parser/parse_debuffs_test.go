@@ -32,7 +32,7 @@ func TestParseMitigs(t *testing.T) {
 func stringifyMitigs(evts []*BuffEvent, ds *xivdata.DataSource) []string {
 	ret := []string{}
 	for _, evt := range evts {
-		name := ds.Abilities[int(evt.ID)].Name
+		name := ds.Actions[int(evt.ID)].Name
 		d := time.Duration(evt.Start) * time.Millisecond
 		d2 := time.Duration(evt.End) * time.Millisecond
 		ret = append(ret, fmt.Sprintf("%02d:%02d-%02d:%02d %s (%d)",
@@ -74,7 +74,7 @@ func stringifyDebuffs(evts []*DebuffEvent, ds *xivdata.DataSource) []string {
 	ret := []string{}
 	sort.Sort(SortByDebuffStart(evts))
 	for _, evt := range evts {
-		name := ds.Abilities[int(evt.ID)].Name
+		name := ds.Actions[int(evt.ID)].Name
 		d := time.Duration(evt.Start) * time.Millisecond
 		d2 := time.Duration(evt.End) * time.Millisecond
 		ret = append(ret, fmt.Sprintf("%02d:%02d-%02d:%02d %s",
